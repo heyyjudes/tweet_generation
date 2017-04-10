@@ -86,7 +86,7 @@ def read_raw(filename):
     return tweets
 
 
-def sentToIdx(corpus, dictT):
+def sentToIdx(corpus, dictTtoIdx, dictIdxtoT):
     words = corpus.split()
     words_idx = []
 
@@ -94,13 +94,16 @@ def sentToIdx(corpus, dictT):
     for word in words:
         if(word != '<pad>'):
             length+=1
-        words_idx.append(dictT[word])
+        words_idx.append(dictTtoIdx[word])
 
     
     while(len(words_idx)!=33):
-        words_idx.append(dictT['<pad>'])
+        words_idx.append(dictTtoIdx['<pad>'])
         length+=1
 
+    print(words)
+    print(map(lambda x: dictTtoIdx[x], words))
+    print(map(lambda x: dictIdxtoT[x], words_idx))
 
     return length, words_idx
 
@@ -118,7 +121,6 @@ def prepare_textdata():
     fdist = nltk.FreqDist(tokenizer.tokenize("\n".join(trump_tweets)))
     trumpVocab =  fdist.keys()
 
-    print fdist.keys()
     fdist = nltk.FreqDist(tokenizer.tokenize("\n".join(obama_tweets)))
     obamaVocab =  fdist.keys()
 
@@ -138,7 +140,7 @@ def prepare_textdata():
     for obama_t in obama_tweets:
         if len(obama_txtfeat) % 100 == 0:
             print "%d entries processed" %len(obama_txtfeat)
-        length, idx = sentToIdx(obama_t, dictOtoIdx)
+        length, idx = sentToIdx(obama_t, dictOtoIdx, dictIdxtoO)
         obama_txtfeat.append(idx)
         obama_length.append(length)
 
@@ -146,7 +148,7 @@ def prepare_textdata():
     for trump_t in trump_tweets:
         if len(trump_txtfeat) % 100 == 0:
             print "%d entries processed" %len(trump_txtfeat)
-        length, idx = sentToIdx(trump_t, dictTtoIdx)
+        length, idx = sentToIdx(trump_t, dictTtoIdx, dictIdxtoT)
         trump_txtfeat.append(idx)
         trump_length.append(length)
     

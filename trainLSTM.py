@@ -115,7 +115,7 @@ def setup_logger(logger_name, log_file, level=logging.INFO, stream=False, writeF
 
 def init_weight(fan_in, fan_out, name=None, stddev=1.0):
     #Initialize with Xavier initialization
-    weights = tf.Variable(tf.truncated_normal([fan_in, fan_out], stddev=stddev/math.sqrt(float(fan_in))), name=name)
+    weights = tf.Variable(tf.random_normal([fan_in, fan_out], stddev=stddev/math.sqrt(float(fan_in))), name=name)
     return weights
 
 def init_bias(fan_out, name=None, stddev=1.0):
@@ -124,10 +124,15 @@ def init_bias(fan_out, name=None, stddev=1.0):
     return bias
 
 
-def init_word_embedding(word_count, vocab_size=300):
+def init_word_embedding(word_count, vocab_size=300, oneHot=True):
     with tf.name_scope('embeddings'):
-        initial = tf.truncated_normal([word_count, vocab_size], stddev=1.0/math.sqrt(word_count))
-        embedding = tf.Variable(initial)
+        if oneHot == True:
+            initial = tf.eye(word_count)
+            print(initial)
+            embedding = tf.Variable(initial, trainable=False)
+        else:
+            initial = tf.random_normal([word_count, vocab_size], stddev=1.0/math.sqrt(word_count))
+            embedding = tf.Variable(initial)
 
     return embedding
 
@@ -147,6 +152,7 @@ def generate(num_words, prompt='<beg>', dictIdxtoT=None, dictTtoIdx=None):
     saver = tf.train.import_meta_graph(FLAGS.checkpoint+".meta")
     vocab_size = len(dictIdxtoT)
     with tf.Session() as sess:
+        sess.run(tf.initialize_all_variables())
         saver.restore(sess, FLAGS.checkpoint)
         graph = tf.get_default_graph()
         '''
@@ -161,16 +167,16 @@ def generate(num_words, prompt='<beg>', dictIdxtoT=None, dictTtoIdx=None):
         length = graph.get_tensor_by_name('length/Placeholder:0')
         state = None
         current_word = dictTtoIdx[prompt]
-        words = [current_word]
+        words = []
 
         for i in range(num_words):
             if state is not None:
-                feed_dict={x_tweets: [[current_word]], init_state: state, batch_size:1, length:[1]}
+                feed_dict={x_tweets: [[current_word]]*FLAGS.batch_size, init_state: state, batch_size:FLAGS.batch_size, length:[1]*FLAGS.batch_size}
             else:
-                feed_dict={x_tweets: [[current_word]], batch_size:1, length:[1]}
+                feed_dict={x_tweets: [[current_word]]*FLAGS.batch_size, batch_size:FLAGS.batch_size, length:[1]*FLAGS.batch_size}
 
             preds, state = sess.run([predictions,last_states], feed_dict)
-            state = state.reshape((1,-1))
+            state = state.reshape((FLAGS.batch_size,-1))
             current_word = np.random.choice(vocab_size, 1, p=np.squeeze(preds))[0]
 
             words.append(current_word)
@@ -181,7 +187,7 @@ def generate(num_words, prompt='<beg>', dictIdxtoT=None, dictTtoIdx=None):
 
 
 def trainTrump():
-    trainData, trainLength= loadData("data/obama_txt.npz")
+    trainData, trainLength= loadData("data/trump_txt.npz")
     num_total = len(trainData)
 
     #Loading Dictionaries...
@@ -240,7 +246,7 @@ def trainTrump():
         x_tweets = tf.placeholder(tf.int32, shape=[None, None])
     tEmb = tf.nn.embedding_lookup(Wemb, x_tweets)
     with tf.name_scope('y_'):
-        y_ = tf.placeholder(tf.int64, shape=[None, None])
+        y_ = tf.placeholder(tf.int32, shape=[None, None])
     with tf.name_scope('batch_size'):
         batch_size = tf.placeholder(dtype=tf.int32)
     with tf.name_scope('length'): 
@@ -373,7 +379,7 @@ def trainObama():
         x_tweets = tf.placeholder(tf.int32, shape=[None, None])
     tEmb = tf.nn.embedding_lookup(Wemb, x_tweets)
     with tf.name_scope('y_'):
-        y_ = tf.placeholder(tf.int64, shape=[None, None])
+        y_ = tf.placeholder(tf.int32, shape=[None, None])
     with tf.name_scope('batch_size'):
         batch_size = tf.placeholder(dtype=tf.int32)
     with tf.name_scope('length'): 
