@@ -14,7 +14,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
 '--eps',
 type=float,
-default=0.1,
+default=0.01,
 help='Initial learning rate.'
 )
 parser.add_argument(
@@ -306,6 +306,11 @@ def trainTrump():
 
                 train_summ, train_ce = sess.run([merged, total_loss], 
                             feed_dict={x_tweets: train_batch_x, 
+                                       y_: train_batch_y,
+                                       batch_size: len(train_batch_y),
+                                       length: train_batch_length})
+
+                sess.run(train_step, feed_dict={x_tweets: train_batch_x, 
                                        y_: train_batch_y,
                                        batch_size: len(train_batch_y),
                                        length: train_batch_length})
