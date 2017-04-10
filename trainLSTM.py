@@ -33,13 +33,31 @@ parser.add_argument(
 '--nlp_dim',
 type=int,
 default=300,
-help='Total number of epochs'
+help='dimension of word embedding vector'
 )
 parser.add_argument(
 '--summaries_dir',
 type=str,
 default="./logs/%s/"%(timestr),
 help='Summaries/Tensorboard Location'
+)
+parser.add_argument(
+'--checkpoint',
+type=str,
+default=None,
+help='checpoint file'
+)
+parser.add_argument(
+'--mode',
+type=str,
+default="trainTrump",
+help='operation mode'
+)
+parser.add_argument(
+'--num_words',
+type=int,
+default=30,
+help='Number of words to be generated'
 )
 
 def variable_summaries(var):
@@ -124,10 +142,45 @@ def loadData(path):
     return np.asarray(train_data['feature']), np.asarray(train_data['length'])
 
 
+def generate(num_words, prompt='<beg>', dictIdxtoT=None, dictTtoIdx=None):
+    """ Accepts a current character, initial state"""
+    saver = tf.train.import_meta_graph(FLAGS.checkpoint+".meta")
+    vocab_size = len(dictIdxtoT)
+    with tf.Session() as sess:
+        saver.restore(sess, FLAGS.checkpoint)
+        graph = tf.get_default_graph()
+        '''
+        for n in tf.get_default_graph().as_graph_def().node:
+            print n.name 
+        '''
+        x_tweets = graph.get_tensor_by_name('x_tweets/Placeholder:0')
+        init_state = graph.get_tensor_by_name('state/zeros_1:0')
+        predictions = graph.get_tensor_by_name('predictions/Softmax:0')
+        last_states = graph.get_tensor_by_name('final_states/RNN/transpose:0')
+        batch_size = graph.get_tensor_by_name('batch_size/Placeholder:0')
+        length = graph.get_tensor_by_name('length/Placeholder:0')
+        state = None
+        current_word = dictTtoIdx[prompt]
+        words = [current_word]
+
+        for i in range(num_words):
+            if state is not None:
+                feed_dict={x_tweets: [[current_word]], init_state: state, batch_size:1, length:[1]}
+            else:
+                feed_dict={x_tweets: [[current_word]], batch_size:1, length:[1]}
+
+            preds, state = sess.run([predictions,last_states], feed_dict)
+            state = state.reshape((1,-1))
+            current_word = np.random.choice(vocab_size, 1, p=np.squeeze(preds))[0]
+
+            words.append(current_word)
+
+    words = map(lambda x: dictIdxtoT[x], words)
+    print(" ".join(words))
+    return(" ".join(words))
+
+
 def trainTrump():
-    global FLAGS
-    FLAGS = parser.parse_args()
-
     trainData, trainLength= loadData("data/obama_txt.npz")
     num_total = len(trainData)
 
@@ -184,32 +237,35 @@ def trainTrump():
 
 
     with tf.name_scope('x_tweets'):
-        x_tweets = tf.placeholder(tf.int32, shape=[None, n_lstm_steps])
+        x_tweets = tf.placeholder(tf.int32, shape=[None, None])
     tEmb = tf.nn.embedding_lookup(Wemb, x_tweets)
     with tf.name_scope('y_'):
-        y_ = tf.placeholder(tf.int64, shape=[None, n_lstm_steps])
+        y_ = tf.placeholder(tf.int64, shape=[None, None])
     with tf.name_scope('batch_size'):
         batch_size = tf.placeholder(dtype=tf.int32)
     with tf.name_scope('length'): 
         length = tf.placeholder(dtype=tf.int32, shape=[None])
 
+    cell = LSTM_simple.CustomCell(hidden_dim, hidden_dim, input_keep_prob=1.0, output_keep_prob=1.0)
+    with tf.name_scope('state'): 
+        init_state = cell.zero_state(batch_size, tf.float32)
 
-    cell = LSTM_simple.CustomCell(hidden_dim, hidden_dim, input_keep_prob=0.8, output_keep_prob=0.5)
-    init_state = cell.zero_state(batch_size, tf.float32)
-    rnn_outputs, last_states = tf.nn.dynamic_rnn(
-        cell=cell,
-        dtype=tf.float32,
-        initial_state=init_state,
-        inputs=tEmb,
-        sequence_length=length)
+    with tf.name_scope('final_states'):
+        rnn_outputs, last_states = tf.nn.dynamic_rnn(
+            cell=cell,
+            dtype=tf.float32,
+            initial_state=init_state,
+            inputs=tEmb,
+            sequence_length=length)
 
-    with tf.variable_scope('softmax'):
-        W = init_weight(hidden_dim, num_classes, name='W')
-        b = init_bias(num_classes, name='b')
-    
+    W = init_weight(hidden_dim, num_classes, name='W')
+    b = init_bias(num_classes, name='b')
     rnn_outputs = tf.reshape(rnn_outputs, [-1, hidden_dim])
     y_flatten = tf.reshape(y_, [-1])
     logits = tf.matmul(rnn_outputs, W) + b
+    with tf.name_scope('predictions'):
+        predictions = tf.nn.softmax(logits)
+
     total_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits, y_flatten))
     summary_list.append(tf.summary.scalar('total loss', total_loss))
     merged = tf.summary.merge(summary_list)
@@ -258,11 +314,8 @@ def trainTrump():
                 logger.info("Train---Loss: %.4f... (%d/%d)" %(train_ce, end, len(trainData)))
 
             epoch_num+=1
-            
+
 def trainObama():
-    global FLAGS
-    FLAGS = parser.parse_args()
-
     trainData, trainLength= loadData("data/obama_txt.npz")
     num_total = len(trainData)
 
@@ -272,13 +325,6 @@ def trainObama():
 
     vocab_size = len(dictIdxtoT)
     words_dim = trainData.shape[1]
-
-
-    #Logging for the training statistics
-    train_ce_list = []
-    train_acc_list = []
-    global summary_list
-    summary_list = []
 
     if not os.path.isdir(FLAGS.summaries_dir):
         os.makedirs(FLAGS.summaries_dir)
@@ -319,32 +365,35 @@ def trainObama():
 
 
     with tf.name_scope('x_tweets'):
-        x_tweets = tf.placeholder(tf.int32, shape=[None, n_lstm_steps])
+        x_tweets = tf.placeholder(tf.int32, shape=[None, None])
     tEmb = tf.nn.embedding_lookup(Wemb, x_tweets)
     with tf.name_scope('y_'):
-        y_ = tf.placeholder(tf.int64, shape=[None, n_lstm_steps])
+        y_ = tf.placeholder(tf.int64, shape=[None, None])
     with tf.name_scope('batch_size'):
         batch_size = tf.placeholder(dtype=tf.int32)
     with tf.name_scope('length'): 
         length = tf.placeholder(dtype=tf.int32, shape=[None])
 
+    cell = LSTM_simple.CustomCell(hidden_dim, hidden_dim, input_keep_prob=1.0, output_keep_prob=1.0)
+    with tf.name_scope('state'): 
+        init_state = cell.zero_state(batch_size, tf.float32)
 
-    cell = LSTM_simple.CustomCell(hidden_dim, hidden_dim, input_keep_prob=0.8, output_keep_prob=0.5)
-    init_state = cell.zero_state(batch_size, tf.float32)
-    rnn_outputs, last_states = tf.nn.dynamic_rnn(
-        cell=cell,
-        dtype=tf.float32,
-        initial_state=init_state,
-        inputs=tEmb,
-        sequence_length=length)
+    with tf.name_scope('final_states'):
+        rnn_outputs, last_states = tf.nn.dynamic_rnn(
+            cell=cell,
+            dtype=tf.float32,
+            initial_state=init_state,
+            inputs=tEmb,
+            sequence_length=length)
 
-    with tf.variable_scope('softmax'):
-        W = init_weight(hidden_dim, num_classes, name='W')
-        b = init_bias(num_classes, name='b')
-    
+    W = init_weight(hidden_dim, num_classes, name='W')
+    b = init_bias(num_classes, name='b')
     rnn_outputs = tf.reshape(rnn_outputs, [-1, hidden_dim])
     y_flatten = tf.reshape(y_, [-1])
     logits = tf.matmul(rnn_outputs, W) + b
+    with tf.name_scope('predictions'):
+        predictions = tf.nn.softmax(logits)
+
     total_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits, y_flatten))
     summary_list.append(tf.summary.scalar('total loss', total_loss))
     merged = tf.summary.merge(summary_list)
@@ -393,8 +442,23 @@ def trainObama():
                 logger.info("Train---Loss: %.4f... (%d/%d)" %(train_ce, end, len(trainData)))
 
             epoch_num+=1
+
 
 
 if __name__ == '__main__':
+    global FLAGS
+    FLAGS = parser.parse_args()
 
-    trainTrump()
+    if FLAGS.mode=="trainTrump":
+        trainTrump()
+    if FLAGS.mode=="trainObama":
+        trainObama()
+    if FLAGS.mode=="generateTrump":
+        dictIdxtoT = pickle.load(open("dictionaries/dictIdxtoT.pkl", "rb"))
+        dictTtoIdx = pickle.load(open("dictionaries/dictTtoIdx.pkl", "rb"))
+        generate(FLAGS.num_words, dictIdxtoT=dictIdxtoT, dictTtoIdx=dictTtoIdx)
+    if FLAGS.mode=="generateObama":
+        dictIdxtoT = pickle.load(open("dictionaries/dictIdxtoO.pkl", "rb"))
+        dictTtoIdx = pickle.load(open("dictionaries/dictOtoIdx.pkl", "rb"))
+        generate(FLAGS.num_words, dictIdxtoT=dictIdxtoT, dictTtoIdx=dictTtoIdx)
+
