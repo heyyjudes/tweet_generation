@@ -124,7 +124,7 @@ def init_bias(fan_out, name=None, stddev=1.0):
     return bias
 
 
-def init_word_embedding(word_count, vocab_size=300, oneHot=True):
+def init_word_embedding(word_count, vocab_size=300, oneHot=False):
     with tf.name_scope('embeddings'):
         if oneHot == True:
             initial = tf.eye(word_count)
@@ -166,24 +166,27 @@ def generate(num_words, prompt='<beg>', dictIdxtoT=None, dictTtoIdx=None):
         batch_size = graph.get_tensor_by_name('batch_size/Placeholder:0')
         length = graph.get_tensor_by_name('length/Placeholder:0')
         state = None
-        current_word = dictTtoIdx[prompt]
+        current_word = [[dictTtoIdx[prompt]]] * FLAGS.batch_size
         words = []
 
         for i in range(num_words):
             if state is not None:
-                feed_dict={x_tweets: [[current_word]]*FLAGS.batch_size, init_state: state, batch_size:FLAGS.batch_size, length:[1]*FLAGS.batch_size}
+                feed_dict={x_tweets: current_word, init_state: state, batch_size:FLAGS.batch_size, length:[1]*FLAGS.batch_size}
             else:
-                feed_dict={x_tweets: [[current_word]]*FLAGS.batch_size, batch_size:FLAGS.batch_size, length:[1]*FLAGS.batch_size}
+                feed_dict={x_tweets: current_word, batch_size:FLAGS.batch_size, length:[1]*FLAGS.batch_size}
 
             preds, state = sess.run([predictions,last_states], feed_dict)
             state = state.reshape((FLAGS.batch_size,-1))
-            current_word = np.random.choice(vocab_size, 1, p=np.squeeze(preds))[0]
 
+            current_word = []
+            for pred in preds:
+                current_word.append([np.random.choice(vocab_size, 1, p=np.squeeze(pred))[0]])
             words.append(current_word)
 
-    words = map(lambda x: dictIdxtoT[x], words)
-    print(" ".join(words))
-    return(" ".join(words))
+    words = np.squeeze(np.asarray(words)).T.tolist()
+    for word in words:
+        word = map(lambda x: dictIdxtoT[x], word)
+        print(" ".join(word))
 
 
 def trainTrump():
