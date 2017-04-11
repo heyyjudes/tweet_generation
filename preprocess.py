@@ -3,6 +3,11 @@ import numpy as np
 import HTMLParser
 from nltk.tokenize import TreebankWordTokenizer
 from nltk.stem.porter import *
+import nltk
+from nltk import word_tokenize
+import pickle
+import os
+import tensorflow as tf
 
 error_list = []
 def twtt1(input_str):
@@ -69,8 +74,103 @@ def load_tokens():
     return token_arr
 
 
+def read_raw(filename):
+    """
+    reads the raw COCO-QA data and stores them in a numpy array
+    returns a numpy array containing all the information
+    """
+    fileDir = "./data/"
+    with open(fileDir+filename, 'r') as f:
+        tweets = f.read().splitlines()
+
+    return tweets
+
+
+def sentToIdx(corpus, dictTtoIdx, dictIdxtoT):
+    words = corpus.split()
+    words_idx = []
+
+    length = 0
+    for word in words:
+        if(word != '<pad>'):
+            length+=1
+        words_idx.append(dictTtoIdx[word])
+
+    
+    while(len(words_idx)!=33):
+        words_idx.append(dictTtoIdx['<pad>'])
+        length+=1
+
+    print(words)
+    print(map(lambda x: dictTtoIdx[x], words))
+    print(map(lambda x: dictIdxtoT[x], words_idx))
+
+    return length, words_idx
+
+
+def prepare_textdata():
+    obama_tweets = read_raw("obama_tweet_1000.txt")
+    trump_tweets = read_raw("trump_tweet_1000.txt")
+
+    obama_length = []
+    trump_length = []
+
+    #Count the frequencies of occurrences of unique words
+    tokenizer = TreebankWordTokenizer()
+    tokenizer.PARENS_BRACKETS = []
+    fdist = nltk.FreqDist(tokenizer.tokenize("\n".join(trump_tweets)))
+    trumpVocab =  fdist.keys()
+
+    fdist = nltk.FreqDist(tokenizer.tokenize("\n".join(obama_tweets)))
+    obamaVocab =  fdist.keys()
+
+    dictTtoIdx = {}
+    dictIdxtoT = {}
+    for idx,word in enumerate(trumpVocab):
+        dictTtoIdx[word] = idx
+        dictIdxtoT[idx] = word
+
+    dictOtoIdx = {}
+    dictIdxtoO = {}
+    for idx,word in enumerate(obamaVocab):
+        dictOtoIdx[word] = idx
+        dictIdxtoO[idx] = word
+
+    obama_txtfeat = []
+    for obama_t in obama_tweets:
+        if len(obama_txtfeat) % 100 == 0:
+            print "%d entries processed" %len(obama_txtfeat)
+        length, idx = sentToIdx(obama_t, dictOtoIdx, dictIdxtoO)
+        obama_txtfeat.append(idx)
+        obama_length.append(length)
+
+    trump_txtfeat = []
+    for trump_t in trump_tweets:
+        if len(trump_txtfeat) % 100 == 0:
+            print "%d entries processed" %len(trump_txtfeat)
+        length, idx = sentToIdx(trump_t, dictTtoIdx, dictIdxtoT)
+        trump_txtfeat.append(idx)
+        trump_length.append(length)
+    
+    if not os.path.isdir("dictionaries"):
+        os.mkdir("dictionaries")
+    pickle.dump(dictTtoIdx, open("dictionaries/dictTtoIdx.pkl", 'w+'))
+    pickle.dump(dictIdxtoT, open("dictionaries/dictIdxtoT.pkl", 'w+'))
+    pickle.dump(dictOtoIdx, open("dictionaries/dictOtoIdx.pkl", 'w+'))
+    pickle.dump(dictIdxtoO, open("dictionaries/dictIdxtoO.pkl", 'w+'))
+
+    np.savez_compressed("data/obama_txt.npz",
+                                feature=obama_txtfeat,
+                                length=obama_length)
+
+    np.savez_compressed("data/trump_txt.npz",
+                                feature=trump_txtfeat,
+                                length=trump_length)
+
 
 if __name__ == "__main__":
+
+
     # generate output tweet file with punctuation removed: 1 tweet per line
     input_path = "data/BarackObama.csv"
     output_file = "data/obama_tweet_1000.txt"
@@ -99,16 +199,24 @@ if __name__ == "__main__":
     token_dict = []
     out_f = open(output_file, 'w')
     for row in new_tweets:
+        print max_len
         final_str = twtt1(row[5])
         final_str = twtt2(final_str)
         final_str = twtt3(final_str)
         tokens, max_len = twtt4(final_str, token_dict, max_len)
-        final_str = twttpad(tokens, max_len)
+        final_str = twttpad(tokens, max_len+2)
         final_str = final_str.lstrip(" ")
         out_f.write(final_str + '\n')
 
+    '''
     token_arr = load_tokens()
     print "total", len(token_dict)
     print "set", len(set(token_dict))
     print max_len
+    '''
+
+
+    prepare_textdata()
+
+
 
